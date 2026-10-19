@@ -14,8 +14,8 @@ import {
   FileText,
   Film,
   Folder,
-  Grid2X2,
   Globe,
+  Grid2X2,
   HardDrive,
   Image,
   LayoutDashboard,
@@ -24,8 +24,8 @@ import {
   LogOut,
   Plus,
   Search,
-  Shield,
   Settings,
+  Shield,
   Trash2,
   Upload,
   X,
@@ -91,7 +91,9 @@ const pretty = (n: number) =>
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem("vault-token") || "");
-  const [apiBaseUrl, setApiBaseUrl] = useState(localStorage.getItem("vault-api-base-url") || DEFAULT_API);
+  const [apiBaseUrl, setApiBaseUrl] = useState(
+    localStorage.getItem("vault-api-base-url") || DEFAULT_API,
+  );
   const [user, setUser] = useState<{
     id: string;
     name: string;
@@ -107,6 +109,9 @@ export default function App() {
   });
   const [health, setHealth] = useState<Health | null>(null);
   const [files, setFiles] = useState<VaultFile[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>(
+    {},
+  );
   const [totalFiles, setTotalFiles] = useState(0);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
@@ -131,6 +136,53 @@ export default function App() {
     () => ({ Authorization: `Bearer ${token}` }),
     [token],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const objectUrls: string[] = [];
+    const imageFiles = files.filter((file) =>
+      file.mime_type.startsWith("image/"),
+    );
+
+    if (imageFiles.length === 0) {
+      setImagePreviews({});
+      return;
+    }
+
+    void Promise.all(
+      imageFiles.map(async (file) => {
+        try {
+          const response = await fetch(
+            `${apiBaseUrl.replace(/\/$/, "")}/api/v1/files/${file.id}`,
+            { headers },
+          );
+          if (!response.ok) return null;
+          const url = URL.createObjectURL(await response.blob());
+          objectUrls.push(url);
+          return [file.id, url] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) {
+        objectUrls.forEach((url) => URL.revokeObjectURL(url));
+        return;
+      }
+      setImagePreviews(
+        Object.fromEntries(
+          entries.filter(
+            (entry): entry is NonNullable<typeof entry> => entry !== null,
+          ),
+        ),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [files, apiBaseUrl, headers]);
   const api = useCallback(
     async <T,>(path: string, init: RequestInit = {}): Promise<T> => {
       const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}${path}`, {
@@ -281,7 +333,10 @@ export default function App() {
       try {
         await new Promise<void>((resolve, reject) => {
           const request = new XMLHttpRequest();
-          request.open("POST", `${apiBaseUrl.replace(/\/$/, "")}/api/v1/workspaces/${workspace}/files`);
+          request.open(
+            "POST",
+            `${apiBaseUrl.replace(/\/$/, "")}/api/v1/workspaces/${workspace}/files`,
+          );
           request.setRequestHeader("Authorization", `Bearer ${token}`);
           request.upload.onprogress = (event) => {
             if (event.lengthComputable)
@@ -375,9 +430,12 @@ export default function App() {
 
   const downloadFile = async (file: VaultFile) => {
     try {
-      const response = await fetch(`${apiBaseUrl.replace(/\/$/, "")}/api/v1/files/${file.id}`, {
-        headers,
-      });
+      const response = await fetch(
+        `${apiBaseUrl.replace(/\/$/, "")}/api/v1/files/${file.id}`,
+        {
+          headers,
+        },
+      );
       if (!response.ok)
         throw new Error(
           (await response.json().catch(() => ({}))).detail || "Download failed",
@@ -397,9 +455,15 @@ export default function App() {
 
   const copyFileUrl = async (file: VaultFile) => {
     try {
-      await navigator.clipboard.writeText(`${apiBaseUrl.replace(/\/$/, "")}/api/v1/files/${file.id}`);
+      await navigator.clipboard.writeText(
+        `${apiBaseUrl.replace(/\/$/, "")}/api/v1/files/${file.id}`,
+      );
       setCopied(file.id);
-      setNotice(file.is_public ? "Public file URL copied" : "Authenticated file API URL copied");
+      setNotice(
+        file.is_public
+          ? "Public file URL copied"
+          : "Authenticated file API URL copied",
+      );
       window.setTimeout(() => setCopied(""), 1800);
     } catch {
       setNotice("Clipboard access is unavailable in this browser.");
@@ -413,10 +477,16 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_public: !file.is_public }),
       });
-      setFiles((current) => current.map((item) => item.id === file.id ? updated : item));
+      setFiles((current) =>
+        current.map((item) => (item.id === file.id ? updated : item)),
+      );
       if (updated.is_public) {
-        await navigator.clipboard.writeText(`${apiBaseUrl.replace(/\/$/, "")}/api/v1/files/${file.id}`);
-        setNotice("Public image link enabled and copied. Anyone with the link can view this file.");
+        await navigator.clipboard.writeText(
+          `${apiBaseUrl.replace(/\/$/, "")}/api/v1/files/${file.id}`,
+        );
+        setNotice(
+          "Public image link enabled and copied. Anyone with the link can view this file.",
+        );
       } else {
         setNotice("Public access disabled");
       }
@@ -475,7 +545,7 @@ export default function App() {
           <div className="brand-mark">
             <Cloud size={23} />
           </div>
-          <div className="eyebrow">TELECLOUD VAULT</div>
+          <div className="eyebrow">TELE S3</div>
           <h1>
             {authMode === "register" ? "Create your account" : "Welcome back"}
           </h1>
@@ -729,7 +799,11 @@ export default function App() {
               className="icon-button"
               title="Open API documentation"
               onClick={() =>
-                window.open(`${apiBaseUrl.replace(/\/$/, "")}/docs`, "_blank", "noopener,noreferrer")
+                window.open(
+                  `${apiBaseUrl.replace(/\/$/, "")}/docs`,
+                  "_blank",
+                  "noopener,noreferrer",
+                )
               }
             >
               <CircleHelp size={18} />
@@ -1124,11 +1198,19 @@ export default function App() {
                           onClick={() => void downloadFile(file)}
                           title={`Download ${file.filename}`}
                         >
-                          <span
-                            className={`file-type ${file.mime_type.startsWith("image/") ? "image-type" : file.mime_type.startsWith("video/") ? "video-type" : ""}`}
-                          >
-                            <Icon size={22} />
-                          </span>
+                          {imagePreviews[file.id] ? (
+                            <img
+                              className="file-thumbnail"
+                              src={imagePreviews[file.id]}
+                              alt=""
+                            />
+                          ) : (
+                            <span
+                              className={`file-type ${file.mime_type.startsWith("image/") ? "image-type" : file.mime_type.startsWith("video/") ? "video-type" : ""}`}
+                            >
+                              <Icon size={22} />
+                            </span>
+                          )}
                         </button>
                         <div className="file-info">
                           <b title={file.filename}>{file.filename}</b>
@@ -1138,8 +1220,16 @@ export default function App() {
                           </small>
                         </div>
                         <div className="file-actions">
-                          <button onClick={() => void setFilePublicAccess(file)} title={file.is_public ? "Disable public access" : "Allow anyone with the link to view this file"}>
-                            <Globe size={15} /> {file.is_public ? "Make private" : "Make public"}
+                          <button
+                            onClick={() => void setFilePublicAccess(file)}
+                            title={
+                              file.is_public
+                                ? "Disable public access"
+                                : "Allow anyone with the link to view this file"
+                            }
+                          >
+                            <Globe size={15} />{" "}
+                            {file.is_public ? "Make private" : "Make public"}
                           </button>
                           <button onClick={() => void downloadFile(file)}>
                             <File size={15} /> Download
